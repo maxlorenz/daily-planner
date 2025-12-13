@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024
 
 ;; Author: Your Name <your@email.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: tools, convenience
 ;; URL: https://github.com/USERNAME/daily-planner
@@ -16,12 +16,20 @@
 ;; - GitHub PRs and review requests
 ;; - Linear assigned tickets and notifications
 ;; - AI/Aviation news from Hacker News
+;;
+;; Optional dependency: nerd-icons for beautiful icons
 
 ;;; Code:
 
 (require 'json)
 (require 'url)
 (require 'url-http)
+
+;; Optional nerd-icons support
+(declare-function nerd-icons-octicon "nerd-icons")
+(declare-function nerd-icons-faicon "nerd-icons")
+(declare-function nerd-icons-mdicon "nerd-icons")
+(declare-function nerd-icons-codicon "nerd-icons")
 
 ;;; Custom Variables
 
@@ -92,11 +100,42 @@ Matching is case-insensitive."
   :type 'string
   :group 'daily-planner)
 
+(defcustom daily-planner-use-nerd-icons t
+  "If non-nil, use nerd-icons for visual elements.
+Requires the `nerd-icons' package to be installed."
+  :type 'boolean
+  :group 'daily-planner)
+
+(defcustom daily-planner-separator-char ?─
+  "Character used for section separators."
+  :type 'character
+  :group 'daily-planner)
+
+(defcustom daily-planner-separator-width 60
+  "Width of section separators."
+  :type 'integer
+  :group 'daily-planner)
+
 ;;; Faces
 
+(defface daily-planner-title-face
+  '((t :inherit font-lock-keyword-face :height 1.5 :weight bold))
+  "Face for the main title."
+  :group 'daily-planner)
+
+(defface daily-planner-date-face
+  '((t :inherit font-lock-comment-face :height 1.1))
+  "Face for the date display."
+  :group 'daily-planner)
+
 (defface daily-planner-section-header
-  '((t :inherit font-lock-keyword-face :height 1.3 :weight bold))
+  '((t :inherit font-lock-keyword-face :height 1.2 :weight bold))
   "Face for section headers."
+  :group 'daily-planner)
+
+(defface daily-planner-subsection-header
+  '((t :inherit font-lock-type-face :weight semi-bold))
+  "Face for subsection headers."
   :group 'daily-planner)
 
 (defface daily-planner-item-title
@@ -105,13 +144,28 @@ Matching is case-insensitive."
   :group 'daily-planner)
 
 (defface daily-planner-item-meta
-  '((t :inherit font-lock-comment-face))
+  '((t :inherit font-lock-comment-face :height 0.9))
   "Face for item metadata."
   :group 'daily-planner)
 
 (defface daily-planner-urgent
   '((t :inherit font-lock-warning-face :weight bold))
   "Face for urgent items."
+  :group 'daily-planner)
+
+(defface daily-planner-separator-face
+  '((t :inherit font-lock-comment-face))
+  "Face for separators."
+  :group 'daily-planner)
+
+(defface daily-planner-icon-face
+  '((t :inherit font-lock-constant-face))
+  "Face for icons."
+  :group 'daily-planner)
+
+(defface daily-planner-shortcut-face
+  '((t :inherit font-lock-keyword-face :weight normal))
+  "Face for keyboard shortcuts."
   :group 'daily-planner)
 
 ;;; Internal Variables
@@ -129,8 +183,12 @@ Matching is case-insensitive."
     (define-key map (kbd "g") #'daily-planner-refresh)
     (define-key map (kbd "q") #'quit-window)
     (define-key map (kbd "RET") #'daily-planner-open-item-at-point)
+    (define-key map (kbd "<return>") #'daily-planner-open-item-at-point)
+    (define-key map (kbd "o") #'daily-planner-open-item-at-point)
     (define-key map (kbd "n") #'daily-planner-next-item)
     (define-key map (kbd "p") #'daily-planner-prev-item)
+    (define-key map (kbd "j") #'daily-planner-next-item)
+    (define-key map (kbd "k") #'daily-planner-prev-item)
     map)
   "Keymap for `daily-planner-mode'.")
 
@@ -140,6 +198,10 @@ Matching is case-insensitive."
 \\{daily-planner-mode-map}"
   (setq buffer-read-only t)
   (setq truncate-lines t)
+  (setq-local cursor-type nil)
+  ;; Evil mode compatibility
+  (when (bound-and-true-p evil-mode)
+    (evil-set-initial-state 'daily-planner-mode 'emacs))
   (when daily-planner-auto-refresh-interval
     (daily-planner--start-auto-refresh)))
 
@@ -225,6 +287,38 @@ Linear API keys should not use Bearer prefix."
                 (json-read-from-string json-string)
               (error nil))))
       (error nil))))
+
+;;; Icons
+
+(defun daily-planner--nerd-icons-available-p ()
+  "Check if nerd-icons is available."
+  (and daily-planner-use-nerd-icons
+       (require 'nerd-icons nil t)))
+
+(defun daily-planner--icon (icon-name &optional fallback)
+  "Get nerd-icon ICON-NAME or FALLBACK string."
+  (if (daily-planner--nerd-icons-available-p)
+      (propertize (pcase icon-name
+                    ('github (nerd-icons-octicon "nf-oct-mark_github"))
+                    ('pr (nerd-icons-octicon "nf-oct-git_pull_request"))
+                    ('review (nerd-icons-octicon "nf-oct-eye"))
+                    ('linear (nerd-icons-mdicon "nf-md-vector_line"))
+                    ('issue (nerd-icons-octicon "nf-oct-issue_opened"))
+                    ('comment (nerd-icons-octicon "nf-oct-comment"))
+                    ('hn (nerd-icons-faicon "nf-fa-hacker_news"))
+                    ('news (nerd-icons-octicon "nf-oct-flame"))
+                    ('bullet (nerd-icons-codicon "nf-cod-circle_filled"))
+                    ('urgent (nerd-icons-codicon "nf-cod-warning"))
+                    ('clock (nerd-icons-octicon "nf-oct-clock"))
+                    ('calendar (nerd-icons-octicon "nf-oct-calendar"))
+                    (_ (nerd-icons-codicon "nf-cod-circle_small_filled")))
+                  'face 'daily-planner-icon-face)
+    (or fallback "")))
+
+(defun daily-planner--separator ()
+  "Return a separator line."
+  (propertize (make-string daily-planner-separator-width daily-planner-separator-char)
+              'face 'daily-planner-separator-face))
 
 ;;; GitHub Module
 
@@ -315,37 +409,47 @@ query {
                    (alist-get 'name (alist-get 'repository item))
                    "unknown"))
          (created (alist-get 'createdAt item))
-         (time-str (if created (daily-planner--format-relative-time created) "")))
+         (time-str (if created (daily-planner--format-relative-time created) ""))
+         (bullet (daily-planner--icon 'bullet "  *")))
     (propertize
      (concat
-      (propertize (format "  \u2022 %s" title) 'face 'daily-planner-item-title)
+      (format "   %s " bullet)
+      (propertize title 'face 'daily-planner-item-title)
       "\n"
-      (propertize (format "    %s \u00b7 %s" repo time-str) 'face 'daily-planner-item-meta)
+      (propertize (format "       %s  %s" repo time-str) 'face 'daily-planner-item-meta)
       "\n")
      'daily-planner-url url)))
 
 (defun daily-planner-github--format-section (data)
   "Format GitHub section from DATA."
   (let ((prs (alist-get 'prs data))
-        (reviews (alist-get 'reviews data)))
+        (reviews (alist-get 'reviews data))
+        (gh-icon (daily-planner--icon 'github ""))
+        (pr-icon (daily-planner--icon 'pr ""))
+        (review-icon (daily-planner--icon 'review "")))
     (concat
-     (propertize "GitHub" 'face 'daily-planner-section-header)
-     "\n\n"
+     (format "%s %s\n\n"
+             gh-icon
+             (propertize "GitHub" 'face 'daily-planner-section-header))
      (if (or (and prs (> (length prs) 0))
              (and reviews (> (length reviews) 0)))
          (concat
           (when (and prs (> (length prs) 0))
             (concat
-             (propertize " My Open PRs" 'face 'bold) "\n"
+             (format "  %s %s\n"
+                     pr-icon
+                     (propertize "My Open PRs" 'face 'daily-planner-subsection-header))
              (mapconcat #'daily-planner-github--format-item
                         (seq-into (seq-take prs daily-planner-max-items-per-section) 'list) "")
              "\n"))
           (when (and reviews (> (length reviews) 0))
             (concat
-             (propertize " Review Requested" 'face 'bold) "\n"
+             (format "  %s %s\n"
+                     review-icon
+                     (propertize "Review Requested" 'face 'daily-planner-subsection-header))
              (mapconcat #'daily-planner-github--format-item
                         (seq-into (seq-take reviews daily-planner-max-items-per-section) 'list) ""))))
-       "  No open PRs or review requests\n")
+       (propertize "   No open PRs or review requests\n" 'face 'daily-planner-item-meta))
      "\n")))
 
 ;;; Linear Module
@@ -410,16 +514,20 @@ query {
          (priority (alist-get 'priority issue))
          (state (alist-get 'name (alist-get 'state issue)))
          (project (alist-get 'name (alist-get 'project issue)))
-         (urgent (and priority (= priority 1))))
+         (urgent (and priority (= priority 1)))
+         (bullet (if urgent
+                     (daily-planner--icon 'urgent "!")
+                   (daily-planner--icon 'bullet "*"))))
     (propertize
      (concat
-      (propertize (format "  \u2022 [%s] %s" identifier title)
-                  'face (if urgent 'daily-planner-urgent 'daily-planner-item-title))
+      (format "   %s " bullet)
+      (propertize (format "[%s] " identifier) 'face 'daily-planner-item-meta)
+      (propertize title 'face (if urgent 'daily-planner-urgent 'daily-planner-item-title))
       "\n"
-      (propertize (format "    %s \u00b7 %s%s"
+      (propertize (format "       %s  %s%s"
                           (or state "Unknown")
                           (daily-planner-linear--priority-label priority)
-                          (if project (concat " \u00b7 " project) ""))
+                          (if project (concat "  " project) ""))
                   'face 'daily-planner-item-meta)
       "\n")
      'daily-planner-url url)))
@@ -432,14 +540,16 @@ query {
          (title (alist-get 'title issue))
          (url (alist-get 'url issue))
          (identifier (alist-get 'identifier issue))
-         (commenter (alist-get 'name (alist-get 'user comment))))
+         (commenter (alist-get 'name (alist-get 'user comment)))
+         (bullet (daily-planner--icon 'bullet "*")))
     (when (and issue (string-match-p "comment\\|mention" (downcase (or type ""))))
       (propertize
        (concat
-        (propertize (format "  \u2022 [%s] %s" identifier title)
-                    'face 'daily-planner-item-title)
+        (format "   %s " bullet)
+        (propertize (format "[%s] " identifier) 'face 'daily-planner-item-meta)
+        (propertize title 'face 'daily-planner-item-title)
         "\n"
-        (propertize (format "    %s commented" (or commenter "Someone"))
+        (propertize (format "       %s commented" (or commenter "Someone"))
                     'face 'daily-planner-item-meta)
         "\n")
        'daily-planner-url url))))
@@ -447,16 +557,22 @@ query {
 (defun daily-planner-linear--format-section (data)
   "Format Linear section from DATA."
   (let ((issues (alist-get 'issues data))
-        (notifications (alist-get 'notifications data)))
+        (notifications (alist-get 'notifications data))
+        (linear-icon (daily-planner--icon 'linear ""))
+        (issue-icon (daily-planner--icon 'issue ""))
+        (comment-icon (daily-planner--icon 'comment "")))
     (concat
-     (propertize "Linear" 'face 'daily-planner-section-header)
-     "\n\n"
+     (format "%s %s\n\n"
+             linear-icon
+             (propertize "Linear" 'face 'daily-planner-section-header))
      (if (or (and issues (> (length issues) 0))
              (and notifications (> (length notifications) 0)))
          (concat
           (when (and issues (> (length issues) 0))
             (concat
-             (propertize " Assigned Issues" 'face 'bold) "\n"
+             (format "  %s %s\n"
+                     issue-icon
+                     (propertize "Assigned Issues" 'face 'daily-planner-subsection-header))
              (mapconcat #'daily-planner-linear--format-issue
                         (seq-into (seq-take issues daily-planner-max-items-per-section) 'list) "")
              "\n"))
@@ -465,9 +581,11 @@ query {
                                                      (seq-into (seq-take notifications daily-planner-max-items-per-section) 'list)))))
             (when filtered-notifs
               (concat
-               (propertize " Recent Mentions" 'face 'bold) "\n"
+               (format "  %s %s\n"
+                       comment-icon
+                       (propertize "Recent Mentions" 'face 'daily-planner-subsection-header))
                (apply #'concat filtered-notifs)))))
-       "  No assigned issues or mentions\n")
+       (propertize "   No assigned issues or mentions\n" 'face 'daily-planner-item-meta))
      "\n")))
 
 ;;; Hacker News Module
@@ -527,13 +645,14 @@ query {
          (url (or (alist-get 'url story)
                   (format "https://news.ycombinator.com/item?id=%s" (alist-get 'id story))))
          (score (alist-get 'score story))
-         (comments (alist-get 'descendants story)))
+         (comments (alist-get 'descendants story))
+         (bullet (daily-planner--icon 'bullet "*")))
     (propertize
      (concat
-      (propertize (format "  \u2022 %s" title)
-                  'face 'daily-planner-item-title)
+      (format "   %s " bullet)
+      (propertize title 'face 'daily-planner-item-title)
       "\n"
-      (propertize (format "    %s points \u00b7 %s comments"
+      (propertize (format "       %s points  %s comments"
                           (or score 0)
                           (or comments 0))
                   'face 'daily-planner-item-meta)
@@ -542,14 +661,20 @@ query {
 
 (defun daily-planner-hn--format-section (data)
   "Format Hacker News section from DATA."
-  (let ((stories (alist-get 'stories data)))
+  (let ((stories (alist-get 'stories data))
+        (hn-icon (daily-planner--icon 'hn ""))
+        (news-icon (daily-planner--icon 'news "")))
     (concat
-     (propertize "Hacker News (AI/Aviation)" 'face 'daily-planner-section-header)
-     "\n\n"
+     (format "%s %s\n\n"
+             hn-icon
+             (propertize "Hacker News" 'face 'daily-planner-section-header))
+     (format "  %s %s\n"
+             news-icon
+             (propertize "Matching Stories" 'face 'daily-planner-subsection-header))
      (if (and stories (> (length stories) 0))
          (mapconcat #'daily-planner-hn--format-story
                     (seq-into stories 'list) "")
-       "  No matching stories today\n")
+       (propertize "   No matching stories today\n" 'face 'daily-planner-item-meta))
      "\n")))
 
 ;;; Dashboard Rendering
@@ -559,27 +684,50 @@ query {
   (let ((inhibit-read-only t)
         (github-data (alist-get 'github daily-planner--data))
         (linear-data (alist-get 'linear daily-planner--data))
-        (hn-data (alist-get 'hn daily-planner--data)))
+        (hn-data (alist-get 'hn daily-planner--data))
+        (calendar-icon (daily-planner--icon 'calendar "")))
     (erase-buffer)
-    (insert (propertize "Daily Planner" 'face '(:height 1.5 :weight bold)))
+    ;; Header
     (insert "\n")
-    (insert (propertize (format-time-string "%A, %B %d, %Y") 'face 'daily-planner-item-meta))
+    (insert (propertize "  Daily Planner" 'face 'daily-planner-title-face))
+    (insert "\n")
+    (insert (format "  %s %s"
+                    calendar-icon
+                    (propertize (format-time-string "%A, %B %d, %Y") 'face 'daily-planner-date-face)))
     (insert "\n\n")
-    (insert (make-string 50 ?\u2500))
+    (insert "  ")
+    (insert (daily-planner--separator))
     (insert "\n\n")
+    ;; GitHub Section
     (when github-data
       (insert (daily-planner-github--format-section github-data)))
-    (insert (make-string 50 ?\u2500))
+    (insert "  ")
+    (insert (daily-planner--separator))
     (insert "\n\n")
+    ;; Linear Section
     (when linear-data
       (insert (daily-planner-linear--format-section linear-data)))
-    (insert (make-string 50 ?\u2500))
+    (insert "  ")
+    (insert (daily-planner--separator))
     (insert "\n\n")
+    ;; Hacker News Section
     (when hn-data
       (insert (daily-planner-hn--format-section hn-data)))
+    ;; Footer
     (insert "\n")
-    (insert (propertize "Press 'g' to refresh, 'q' to quit, RET to open item"
-                        'face 'daily-planner-item-meta))
+    (insert "  ")
+    (insert (daily-planner--separator))
+    (insert "\n\n")
+    (insert (propertize "  Keys: " 'face 'daily-planner-item-meta))
+    (insert (propertize "g" 'face 'daily-planner-shortcut-face))
+    (insert (propertize " refresh  " 'face 'daily-planner-item-meta))
+    (insert (propertize "RET/o" 'face 'daily-planner-shortcut-face))
+    (insert (propertize " open  " 'face 'daily-planner-item-meta))
+    (insert (propertize "j/k" 'face 'daily-planner-shortcut-face))
+    (insert (propertize " navigate  " 'face 'daily-planner-item-meta))
+    (insert (propertize "q" 'face 'daily-planner-shortcut-face))
+    (insert (propertize " quit" 'face 'daily-planner-item-meta))
+    (insert "\n")
     (goto-char (point-min))))
 
 ;;; Interactive Commands
@@ -652,6 +800,22 @@ query {
   (when daily-planner--refresh-timer
     (cancel-timer daily-planner--refresh-timer)
     (setq daily-planner--refresh-timer nil)))
+
+;;; Evil mode support
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'daily-planner-mode 'emacs)
+  ;; Also define keys in evil-emacs-state-map for this mode
+  (evil-define-key 'emacs daily-planner-mode-map
+    (kbd "RET") #'daily-planner-open-item-at-point
+    (kbd "<return>") #'daily-planner-open-item-at-point
+    (kbd "o") #'daily-planner-open-item-at-point
+    (kbd "g") #'daily-planner-refresh
+    (kbd "q") #'quit-window
+    (kbd "j") #'daily-planner-next-item
+    (kbd "k") #'daily-planner-prev-item
+    (kbd "n") #'daily-planner-next-item
+    (kbd "p") #'daily-planner-prev-item))
 
 (provide 'daily-planner)
 ;;; daily-planner.el ends here
