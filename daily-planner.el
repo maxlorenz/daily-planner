@@ -436,7 +436,7 @@ query {
          (concat
           (when (and prs (> (length prs) 0))
             (concat
-             (format "  %s %s\n"
+             (format "  %s %s\n\n"
                      pr-icon
                      (propertize "My Open PRs" 'face 'daily-planner-subsection-header))
              (mapconcat #'daily-planner-github--format-item
@@ -444,7 +444,7 @@ query {
              "\n"))
           (when (and reviews (> (length reviews) 0))
             (concat
-             (format "  %s %s\n"
+             (format "  %s %s\n\n"
                      review-icon
                      (propertize "Review Requested" 'face 'daily-planner-subsection-header))
              (mapconcat #'daily-planner-github--format-item
@@ -570,7 +570,7 @@ query {
          (concat
           (when (and issues (> (length issues) 0))
             (concat
-             (format "  %s %s\n"
+             (format "  %s %s\n\n"
                      issue-icon
                      (propertize "Assigned Issues" 'face 'daily-planner-subsection-header))
              (mapconcat #'daily-planner-linear--format-issue
@@ -581,7 +581,7 @@ query {
                                                      (seq-into (seq-take notifications daily-planner-max-items-per-section) 'list)))))
             (when filtered-notifs
               (concat
-               (format "  %s %s\n"
+               (format "  %s %s\n\n"
                        comment-icon
                        (propertize "Recent Mentions" 'face 'daily-planner-subsection-header))
                (apply #'concat filtered-notifs)))))
@@ -668,7 +668,7 @@ query {
      (format "%s %s\n\n"
              hn-icon
              (propertize "Hacker News" 'face 'daily-planner-section-header))
-     (format "  %s %s\n"
+     (format "  %s %s\n\n"
              news-icon
              (propertize "Matching Stories" 'face 'daily-planner-subsection-header))
      (if (and stories (> (length stories) 0))
