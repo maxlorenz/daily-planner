@@ -176,7 +176,8 @@ Returns parsed JSON or nil on error."
       (error nil))))
 
 (defun daily-planner--graphql-request (url query &optional variables token)
-  "Make GraphQL request to URL with QUERY, VARIABLES, and TOKEN."
+  "Make GraphQL request to URL with QUERY, VARIABLES, and TOKEN.
+TOKEN is sent as Bearer token in Authorization header."
   (let* ((url-request-method "POST")
          (url-request-extra-headers
           `(("Content-Type" . "application/json")
@@ -195,14 +196,37 @@ Returns parsed JSON or nil on error."
               (error nil))))
       (error nil))))
 
+(defun daily-planner--linear-graphql-request (query &optional variables)
+  "Make GraphQL request to Linear API with QUERY and VARIABLES.
+Linear API keys should not use Bearer prefix."
+  (let* ((token (daily-planner--get-linear-key))
+         (url-request-method "POST")
+         (url-request-extra-headers
+          `(("Content-Type" . "application/json")
+            ,@(when token `(("Authorization" . ,token)))))
+         (body (json-encode `((query . ,query)
+                              ,@(when variables `((variables . ,variables))))))
+         (url-request-data body))
+    (condition-case nil
+        (with-current-buffer (url-retrieve-synchronously "https://api.linear.app/graphql" t t 30)
+          (goto-char (point-min))
+          (re-search-forward "^$" nil t)
+          (let ((json-string (buffer-substring-no-properties (point) (point-max))))
+            (kill-buffer)
+            (condition-case nil
+                (json-read-from-string json-string)
+              (error nil))))
+      (error nil))))
+
 ;;; GitHub Module
 
 (defun daily-planner-github--fetch-with-cli ()
-  "Fetch GitHub data using gh CLI."
+  "Fetch GitHub data using gh CLI.
+Uses `gh search prs` to find PRs across all repositories."
   (let ((prs-json (shell-command-to-string
-                   "gh pr list --author @me --json title,url,repository,createdAt,state --limit 20 2>/dev/null"))
+                   "gh search prs --author @me --state open --json title,url,repository,createdAt,state --limit 20 2>/dev/null"))
         (reviews-json (shell-command-to-string
-                       "gh pr list --search 'review-requested:@me' --json title,url,repository,createdAt,state --limit 20 2>/dev/null")))
+                       "gh search prs --review-requested @me --state open --json title,url,repository,createdAt,state --limit 20 2>/dev/null")))
     (list
      (cons 'prs (condition-case nil (json-read-from-string prs-json) (error nil)))
      (cons 'reviews (condition-case nil (json-read-from-string reviews-json) (error nil))))))
@@ -280,13 +304,13 @@ query {
             (concat
              (propertize " My Open PRs" 'face 'bold) "\n"
              (mapconcat #'daily-planner-github--format-item
-                        (seq-take prs daily-planner-max-items-per-section) "")
+                        (seq-into (seq-take prs daily-planner-max-items-per-section) 'list) "")
              "\n"))
           (when (and reviews (> (length reviews) 0))
             (concat
              (propertize " Review Requested" 'face 'bold) "\n"
              (mapconcat #'daily-planner-github--format-item
-                        (seq-take reviews daily-planner-max-items-per-section) ""))))
+                        (seq-into (seq-take reviews daily-planner-max-items-per-section) 'list) ""))))
        "  No open PRs or review requests\n")
      "\n")))
 
@@ -294,8 +318,7 @@ query {
 
 (defun daily-planner-linear--fetch ()
   "Fetch Linear assigned issues and notifications."
-  (let* ((token (daily-planner--get-linear-key))
-         (query "
+  (let* ((query "
 query {
   viewer {
     assignedIssues(first: 20, filter: { state: { type: { nin: [\"completed\", \"canceled\"] } } }) {
@@ -314,21 +337,21 @@ query {
     nodes {
       type
       createdAt
-      issue {
-        title
-        url
-        identifier
-      }
-      comment {
-        body
-        user { name }
+      ... on IssueNotification {
+        issue {
+          title
+          url
+          identifier
+        }
+        comment {
+          body
+          user { name }
+        }
       }
     }
   }
 }")
-         (response (daily-planner--graphql-request
-                    "https://api.linear.app/graphql"
-                    query nil token)))
+         (response (daily-planner--linear-graphql-request query)))
     (when response
       (let ((data (alist-get 'data response)))
         (list
@@ -392,17 +415,18 @@ query {
     (concat
      (propertize "Linear" 'face 'daily-planner-section-header)
      "\n\n"
-     (if (or issues notifications)
+     (if (or (and issues (> (length issues) 0))
+             (and notifications (> (length notifications) 0)))
          (concat
           (when (and issues (> (length issues) 0))
             (concat
              (propertize " Assigned Issues" 'face 'bold) "\n"
              (mapconcat #'daily-planner-linear--format-issue
-                        (seq-take issues daily-planner-max-items-per-section) "")
+                        (seq-into (seq-take issues daily-planner-max-items-per-section) 'list) "")
              "\n"))
           (let ((filtered-notifs (seq-filter #'identity
                                              (mapcar #'daily-planner-linear--format-notification
-                                                     (seq-take notifications daily-planner-max-items-per-section)))))
+                                                     (seq-into (seq-take notifications daily-planner-max-items-per-section) 'list)))))
             (when filtered-notifs
               (concat
                (propertize " Recent Mentions" 'face 'bold) "\n"
@@ -486,7 +510,8 @@ query {
      (propertize "Hacker News (AI/Aviation)" 'face 'daily-planner-section-header)
      "\n\n"
      (if (and stories (> (length stories) 0))
-         (mapconcat #'daily-planner-hn--format-story stories "")
+         (mapconcat #'daily-planner-hn--format-story
+                    (seq-into stories 'list) "")
        "  No matching stories today\n")
      "\n")))
 
