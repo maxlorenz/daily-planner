@@ -803,19 +803,12 @@ query {
 
 ;;; Evil mode support
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state 'daily-planner-mode 'emacs)
-  ;; Also define keys in evil-emacs-state-map for this mode
-  (evil-define-key 'emacs daily-planner-mode-map
-    (kbd "RET") #'daily-planner-open-item-at-point
-    (kbd "<return>") #'daily-planner-open-item-at-point
-    (kbd "o") #'daily-planner-open-item-at-point
-    (kbd "g") #'daily-planner-refresh
-    (kbd "q") #'quit-window
-    (kbd "j") #'daily-planner-next-item
-    (kbd "k") #'daily-planner-prev-item
-    (kbd "n") #'daily-planner-next-item
-    (kbd "p") #'daily-planner-prev-item))
+(defun daily-planner--setup-evil ()
+  "Setup Evil mode keybindings for daily-planner."
+  (when (bound-and-true-p evil-mode)
+    (evil-set-initial-state 'daily-planner-mode 'emacs)))
+
+(add-hook 'daily-planner-mode-hook #'daily-planner--setup-evil)
 
 (provide 'daily-planner)
 ;;; daily-planner.el ends here
