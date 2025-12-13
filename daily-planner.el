@@ -47,6 +47,14 @@ Can also be set via GITHUB_TOKEN environment variable."
   :type 'boolean
   :group 'daily-planner)
 
+(defcustom daily-planner-github-repo-filter nil
+  "List of repository name substrings to filter GitHub results.
+When non-nil, only PRs from repositories matching any of these
+substrings will be shown. Matching is case-insensitive.
+Example: \\='(\"dev-setup\" \"my-project\")"
+  :type '(choice (const nil) (repeat string))
+  :group 'daily-planner)
+
 ;; Linear Configuration
 (defcustom daily-planner-linear-api-key nil
   "Linear API key.
@@ -220,16 +228,38 @@ Linear API keys should not use Bearer prefix."
 
 ;;; GitHub Module
 
+(defun daily-planner-github--matches-repo-filter-p (item)
+  "Check if ITEM's repository matches the configured filter.
+Returns t if no filter is set or if repo matches any filter substring."
+  (if (null daily-planner-github-repo-filter)
+      t
+    (let* ((repo (or (alist-get 'nameWithOwner (alist-get 'repository item))
+                     (alist-get 'name (alist-get 'repository item))
+                     ""))
+           (repo-lower (downcase repo)))
+      (seq-some (lambda (filter)
+                  (string-match-p (regexp-quote (downcase filter)) repo-lower))
+                daily-planner-github-repo-filter))))
+
+(defun daily-planner-github--filter-by-repo (items)
+  "Filter ITEMS by repository if filter is configured."
+  (if (null daily-planner-github-repo-filter)
+      items
+    (seq-filter #'daily-planner-github--matches-repo-filter-p
+                (seq-into items 'list))))
+
 (defun daily-planner-github--fetch-with-cli ()
   "Fetch GitHub data using gh CLI.
 Uses `gh search prs` to find PRs across all repositories."
-  (let ((prs-json (shell-command-to-string
-                   "gh search prs --author @me --state open --json title,url,repository,createdAt,state --limit 20 2>/dev/null"))
-        (reviews-json (shell-command-to-string
-                       "gh search prs --review-requested @me --state open --json title,url,repository,createdAt,state --limit 20 2>/dev/null")))
+  (let* ((prs-json (shell-command-to-string
+                    "gh search prs --author @me --state open --json title,url,repository,createdAt,state --limit 20 2>/dev/null"))
+         (reviews-json (shell-command-to-string
+                        "gh search prs --review-requested @me --state open --json title,url,repository,createdAt,state --limit 20 2>/dev/null"))
+         (prs (condition-case nil (json-read-from-string prs-json) (error nil)))
+         (reviews (condition-case nil (json-read-from-string reviews-json) (error nil))))
     (list
-     (cons 'prs (condition-case nil (json-read-from-string prs-json) (error nil)))
-     (cons 'reviews (condition-case nil (json-read-from-string reviews-json) (error nil))))))
+     (cons 'prs (daily-planner-github--filter-by-repo prs))
+     (cons 'reviews (daily-planner-github--filter-by-repo reviews)))))
 
 (defun daily-planner-github--fetch-with-api ()
   "Fetch GitHub data using GraphQL API."
@@ -266,8 +296,10 @@ query {
     (when response
       (let ((data (alist-get 'data response)))
         (list
-         (cons 'prs (alist-get 'nodes (alist-get 'prs data)))
-         (cons 'reviews (alist-get 'nodes (alist-get 'reviews data))))))))
+         (cons 'prs (daily-planner-github--filter-by-repo
+                     (alist-get 'nodes (alist-get 'prs data))))
+         (cons 'reviews (daily-planner-github--filter-by-repo
+                         (alist-get 'nodes (alist-get 'reviews data)))))))))
 
 (defun daily-planner-github--fetch ()
   "Fetch GitHub PRs and review requests."
@@ -284,11 +316,13 @@ query {
                    "unknown"))
          (created (alist-get 'createdAt item))
          (time-str (if created (daily-planner--format-relative-time created) "")))
-    (concat
-     (propertize (format "  \u2022 %s" title) 'face 'daily-planner-item-title 'daily-planner-url url)
-     "\n"
-     (propertize (format "    %s \u00b7 %s" repo time-str) 'face 'daily-planner-item-meta)
-     "\n")))
+    (propertize
+     (concat
+      (propertize (format "  \u2022 %s" title) 'face 'daily-planner-item-title)
+      "\n"
+      (propertize (format "    %s \u00b7 %s" repo time-str) 'face 'daily-planner-item-meta)
+      "\n")
+     'daily-planner-url url)))
 
 (defun daily-planner-github--format-section (data)
   "Format GitHub section from DATA."
@@ -377,17 +411,18 @@ query {
          (state (alist-get 'name (alist-get 'state issue)))
          (project (alist-get 'name (alist-get 'project issue)))
          (urgent (and priority (= priority 1))))
-    (concat
-     (propertize (format "  \u2022 [%s] %s" identifier title)
-                 'face (if urgent 'daily-planner-urgent 'daily-planner-item-title)
-                 'daily-planner-url url)
-     "\n"
-     (propertize (format "    %s \u00b7 %s%s"
-                         (or state "Unknown")
-                         (daily-planner-linear--priority-label priority)
-                         (if project (concat " \u00b7 " project) ""))
-                 'face 'daily-planner-item-meta)
-     "\n")))
+    (propertize
+     (concat
+      (propertize (format "  \u2022 [%s] %s" identifier title)
+                  'face (if urgent 'daily-planner-urgent 'daily-planner-item-title))
+      "\n"
+      (propertize (format "    %s \u00b7 %s%s"
+                          (or state "Unknown")
+                          (daily-planner-linear--priority-label priority)
+                          (if project (concat " \u00b7 " project) ""))
+                  'face 'daily-planner-item-meta)
+      "\n")
+     'daily-planner-url url)))
 
 (defun daily-planner-linear--format-notification (notification)
   "Format a Linear NOTIFICATION for display."
@@ -399,14 +434,15 @@ query {
          (identifier (alist-get 'identifier issue))
          (commenter (alist-get 'name (alist-get 'user comment))))
     (when (and issue (string-match-p "comment\\|mention" (downcase (or type ""))))
-      (concat
-       (propertize (format "  \u2022 [%s] %s" identifier title)
-                   'face 'daily-planner-item-title
-                   'daily-planner-url url)
-       "\n"
-       (propertize (format "    %s commented" (or commenter "Someone"))
-                   'face 'daily-planner-item-meta)
-       "\n"))))
+      (propertize
+       (concat
+        (propertize (format "  \u2022 [%s] %s" identifier title)
+                    'face 'daily-planner-item-title)
+        "\n"
+        (propertize (format "    %s commented" (or commenter "Someone"))
+                    'face 'daily-planner-item-meta)
+        "\n")
+       'daily-planner-url url))))
 
 (defun daily-planner-linear--format-section (data)
   "Format Linear section from DATA."
@@ -492,16 +528,17 @@ query {
                   (format "https://news.ycombinator.com/item?id=%s" (alist-get 'id story))))
          (score (alist-get 'score story))
          (comments (alist-get 'descendants story)))
-    (concat
-     (propertize (format "  \u2022 %s" title)
-                 'face 'daily-planner-item-title
-                 'daily-planner-url url)
-     "\n"
-     (propertize (format "    %s points \u00b7 %s comments"
-                         (or score 0)
-                         (or comments 0))
-                 'face 'daily-planner-item-meta)
-     "\n")))
+    (propertize
+     (concat
+      (propertize (format "  \u2022 %s" title)
+                  'face 'daily-planner-item-title)
+      "\n"
+      (propertize (format "    %s points \u00b7 %s comments"
+                          (or score 0)
+                          (or comments 0))
+                  'face 'daily-planner-item-meta)
+      "\n")
+     'daily-planner-url url)))
 
 (defun daily-planner-hn--format-section (data)
   "Format Hacker News section from DATA."
