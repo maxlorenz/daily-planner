@@ -1,0 +1,52 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        emacs-version: ['27.1', '28.2', '29.1']
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Emacs
+        uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs-version }}
+      
+      - name: Run ERT tests
+        run: ./scripts/run-tests.sh
+      
+      - name: Run CLI smoke test
+        run: ./scripts/cli-test.sh
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Emacs
+        uses: purcell/setup-emacs@master
+        with:
+          version: '29.1'
+      
+      - name: Check byte compilation
+        run: |
+          emacs --batch \
+            -L . \
+            --eval "(setq byte-compile-error-on-warn t)" \
+            -f batch-byte-compile daily-planner.el
+      
+      - name: Check package headers
+        run: |
+          emacs --batch \
+            -L . \
+            -l daily-planner \
+            --eval '(message "Package loaded successfully: %s" (featurep (quote daily-planner)))'
