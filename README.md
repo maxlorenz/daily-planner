@@ -13,7 +13,7 @@ In `~/.doom.d/packages.el`:
 
 ```elisp
 (package! daily-planner
-  :recipe (:host github :repo "USERNAME/daily-planner"
+  :recipe (:host github :repo "maxlorenz/daily-planner"
            :files ("daily-planner.el")))
 ```
 
@@ -35,14 +35,14 @@ In `~/.doom.d/config.el`:
 
 ```elisp
 (straight-use-package
- '(daily-planner :host github :repo "USERNAME/daily-planner"))
+ '(daily-planner :host github :repo "maxlorenz/daily-planner"))
 ```
 
 ### use-package with vc (Emacs 29+)
 
 ```elisp
 (use-package daily-planner
-  :vc (:url "https://github.com/USERNAME/daily-planner")
+  :vc (:url "https://github.com/maxlorenz/daily-planner")
   :commands (daily-planner-open))
 ```
 
