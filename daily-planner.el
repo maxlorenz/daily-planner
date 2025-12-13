@@ -168,6 +168,11 @@ Requires the `nerd-icons' package to be installed."
   "Face for keyboard shortcuts."
   :group 'daily-planner)
 
+(defface daily-planner-search-highlight
+  '((t :inherit highlight :weight bold))
+  "Face for search match highlights."
+  :group 'daily-planner)
+
 ;;; Internal Variables
 
 (defvar daily-planner--refresh-timer nil
@@ -175,6 +180,15 @@ Requires the `nerd-icons' package to be installed."
 
 (defvar daily-planner--data nil
   "Cached dashboard data.")
+
+(defvar daily-planner--search-overlays nil
+  "List of overlays for search highlights.")
+
+(defvar daily-planner--search-matches nil
+  "List of match positions from last search.")
+
+(defvar daily-planner--search-index 0
+  "Current index in search matches.")
 
 ;;; Mode Definition
 
@@ -189,6 +203,8 @@ Requires the `nerd-icons' package to be installed."
     (define-key map (kbd "p") #'daily-planner-prev-item)
     (define-key map (kbd "j") #'daily-planner-next-item)
     (define-key map (kbd "k") #'daily-planner-prev-item)
+    (define-key map (kbd "/") #'daily-planner-search)
+    (define-key map (kbd "C-s") #'daily-planner-search)
     map)
   "Keymap for `daily-planner-mode'.")
 
@@ -719,6 +735,8 @@ query {
     (insert (daily-planner--separator))
     (insert "\n\n")
     (insert (propertize "  Keys: " 'face 'daily-planner-item-meta))
+    (insert (propertize "/" 'face 'daily-planner-shortcut-face))
+    (insert (propertize " search  " 'face 'daily-planner-item-meta))
     (insert (propertize "g" 'face 'daily-planner-shortcut-face))
     (insert (propertize " refresh  " 'face 'daily-planner-item-meta))
     (insert (propertize "RET/o" 'face 'daily-planner-shortcut-face))
@@ -771,6 +789,100 @@ query {
   (interactive)
   (let ((pos (previous-single-property-change (point) 'daily-planner-url)))
     (when pos (goto-char pos))))
+
+;;; Search
+
+(defun daily-planner--fuzzy-regex (query)
+  "Convert QUERY into a fuzzy matching regex.
+Each character in QUERY can have any characters between them."
+  (let ((chars (string-to-list query)))
+    (mapconcat (lambda (c)
+                 (regexp-quote (char-to-string c)))
+               chars
+               ".*?")))
+
+(defun daily-planner--clear-search-highlights ()
+  "Remove all search highlight overlays."
+  (mapc #'delete-overlay daily-planner--search-overlays)
+  (setq daily-planner--search-overlays nil)
+  (setq daily-planner--search-matches nil)
+  (setq daily-planner--search-index 0))
+
+(defun daily-planner--highlight-matches (regex)
+  "Highlight all matches for REGEX in the buffer.
+Returns list of match positions."
+  (daily-planner--clear-search-highlights)
+  (let ((matches nil)
+        (case-fold-search t))
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward regex nil t)
+        (let ((ov (make-overlay (match-beginning 0) (match-end 0))))
+          (overlay-put ov 'face 'daily-planner-search-highlight)
+          (overlay-put ov 'daily-planner-search t)
+          (push ov daily-planner--search-overlays)
+          (push (match-beginning 0) matches))))
+    (setq daily-planner--search-matches (nreverse matches))
+    daily-planner--search-matches))
+
+(defun daily-planner--jump-to-match (index)
+  "Jump to match at INDEX."
+  (when (and daily-planner--search-matches
+             (>= index 0)
+             (< index (length daily-planner--search-matches)))
+    (setq daily-planner--search-index index)
+    (goto-char (nth index daily-planner--search-matches))
+    (message "Match %d of %d"
+             (1+ index)
+             (length daily-planner--search-matches))))
+
+(defun daily-planner-search-next ()
+  "Jump to next search match."
+  (interactive)
+  (when daily-planner--search-matches
+    (let ((next-index (mod (1+ daily-planner--search-index)
+                           (length daily-planner--search-matches))))
+      (daily-planner--jump-to-match next-index))))
+
+(defun daily-planner-search-prev ()
+  "Jump to previous search match."
+  (interactive)
+  (when daily-planner--search-matches
+    (let ((prev-index (mod (1- daily-planner--search-index)
+                           (length daily-planner--search-matches))))
+      (daily-planner--jump-to-match prev-index))))
+
+(defun daily-planner-search-clear ()
+  "Clear search highlights."
+  (interactive)
+  (daily-planner--clear-search-highlights)
+  (message "Search cleared"))
+
+(defvar daily-planner-search-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-g") #'daily-planner-search-clear)
+    (define-key map (kbd "<escape>") #'daily-planner-search-clear)
+    (define-key map (kbd "n") #'daily-planner-search-next)
+    (define-key map (kbd "N") #'daily-planner-search-prev)
+    map)
+  "Keymap active after a search.")
+
+(defun daily-planner-search ()
+  "Start fuzzy search in the daily planner buffer.
+Type search query, then press RET to jump to first match.
+After searching: n for next match, N for previous, C-g to clear."
+  (interactive)
+  (let* ((query (read-string "Search: "))
+         (regex (daily-planner--fuzzy-regex query))
+         (matches (daily-planner--highlight-matches regex)))
+    (if matches
+        (progn
+          (daily-planner--jump-to-match 0)
+          (set-transient-map daily-planner-search-map t
+                             #'daily-planner--clear-search-highlights)
+          (message "Match 1 of %d (n/N to navigate, C-g to clear)"
+                   (length matches)))
+      (message "No matches found for '%s'" query))))
 
 ;;;###autoload
 (defun daily-planner-open ()
