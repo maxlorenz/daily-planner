@@ -31,6 +31,9 @@
 (declare-function nerd-icons-mdicon "nerd-icons")
 (declare-function nerd-icons-codicon "nerd-icons")
 
+;; Optional evil support
+(declare-function evil-set-initial-state "evil-core")
+
 ;;; Custom Variables
 
 (defgroup daily-planner nil
